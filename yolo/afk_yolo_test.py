@@ -111,7 +111,7 @@ def main():
                 continue
 
             # 使用YOLO进行检测
-            results = model(img, conf=0.8, verbose=False)
+            results = model(img, verbose=True)
 
             # 在图像上绘制检测结果
             annotated_img = results[0].plot()

@@ -23,11 +23,15 @@ STATE_CHECK_RESULT = 4
 current_state = STATE_WAITING_FOR_WEIGHT_MARK  # 直接进入第二阶段
 yolo_model = None
 REFRESH_RATE = 0  # 帧间隔时间（秒），控制检测频率
+# 新增：用于跟踪状态信息输出，避免重复打印
+last_printed_state = None
+last_state_print_time = 0
+STATE_PRINT_INTERVAL = 5  # 同一状态下，状态信息最短重复打印间隔（秒）
 # last_weight_mark_check_time = 0  # 用于第二阶段的计时器 (旧逻辑)
 # CLICK_POSITION_STAGE2_X_RATIO = 0.45  # 第二阶段点击位置的X轴比例 (旧逻辑)
 # CLICK_POSITION_STAGE2_Y_RATIO = 0.75  # 第二阶段点击位置的Y轴比例 (旧逻辑)
 # WEIGHT_MARK_TIMEOUT = 6.0  # weight mark 检测超时时间（秒）(旧逻辑)
-PULL_CONFIRM_TIMEOUT_STAGE2 = 0.5  # 第二阶段检测到 'pull' 后等待 'weight mark' 的超时时间
+PULL_CONFIRM_TIMEOUT_STAGE2 = 1  # 第二阶段检测到 'pull' 后等待 'weight mark' 的超时时间
 pull_detected_timestamp_stage2 = 0  # 第二阶段首次检测到 'pull' 的时间戳
 pull_item_info_stage2 = None  # 第二阶段存储 'pull' item bbox 和 label
 
@@ -42,9 +46,9 @@ last_hook_out_x_stage3 = None  # 第三阶段上一次 'hook_out' 的X坐标
 last_hook_out_x_timestamp_stage3 = 0  # 第三阶段上一次 'hook_out' X坐标的时间戳
 HOOK_OUT_STUCK_TIMEOUT = 0.5  # 'hook_out' 卡住的超时时间 (秒)
 HOOK_OUT_X_STUCK_THRESHOLD = 1.5  # 'hook_out' X坐标卡住的像素阈值
-CLICK_POSITION_STAGE4_STOP_X_RATIO = 0.1  # 第四阶段点击 'stop' 后特定位置的X轴比例
-CLICK_POSITION_STAGE4_STOP_Y_RATIO = 0.9  # 第四阶段点击 'stop' 后特定位置1的Y轴比例
-# 新增：'stop' 后的额外点击和拖拽位置比例 (占位符，需要用户测试确定)
+CLICK_POSITION_STAGE4_STOP_X_RATIO = 0.1  # 第四阶段检测到 'stop' 后返回按钮的X轴比例
+CLICK_POSITION_STAGE4_STOP_Y_RATIO = 0.9  # 第四阶段检测到 'stop' 后返回按钮的Y轴比例
+# 新增：'stop' 后的额外点击和拖拽位置比例
 CLICK_POS2_X_RATIO_AFTER_STOP = 0.8
 CLICK_POS2_Y_RATIO_AFTER_STOP = 0.1
 DRAG_START_POS3_X_RATIO_AFTER_STOP = 0.88
@@ -55,6 +59,25 @@ DRAG_DURATION_AFTER_STOP = 0.5  # 拖拽持续时间（秒）
 
 initial_wait_done_stage4 = False  # 第四阶段初始等待是否已完成
 DEBUG_SHOW_DETECTIONS = True  # 是否显示YOLO检测结果的调试窗口
+
+# --- 状态打印函数 ---
+
+
+def print_state_info(state_name, force=False):
+    """打印状态信息，避免重复打印相同的状态
+
+    Args:
+        state_name: 状态信息文本
+        force: 是否强制打印，不考虑重复
+    """
+    global last_printed_state, last_state_print_time
+
+    current_time = time.time()
+    # 当状态信息发生变化，或强制打印，或超过间隔时间时打印
+    if (state_name != last_printed_state) or force or (current_time - last_state_print_time > STATE_PRINT_INTERVAL):
+        print(state_name)
+        last_printed_state = state_name
+        last_state_print_time = current_time
 
 # --- 窗口和截图相关函数 ---
 
@@ -303,9 +326,9 @@ def main_loop():
                     print("通过调试窗口的 'q' 键退出程序。")
                     break  # 退出主循环
 
-            if detections:  # 新增: 打印当前帧所有检测到的标签
-                print(
-                    f"Debug (Frame Detections): {[d['label'] for d in detections]}")
+            # if detections:  # 新增: 打印当前帧所有检测到的标签
+            #     print(
+            #         f"Debug (Frame Detections): {[d['label'] for d in detections]}")
 
             # print(f"当前状态: {current_state}, 检测到: {[d['label'] for d in detections]}") # 调试信息
 
@@ -325,7 +348,7 @@ def main_loop():
             #             break
 
             if current_state == STATE_WAITING_FOR_WEIGHT_MARK:  # 注意这里从 elif 改为 if，因为它是第一个活动状态检查
-                print("状态: 等待 'pull' 和 'weight mark'...")
+                print_state_info("状态: 等待 'pull' 和 'weight mark'...")
 
                 current_pull_item = None  # 当前帧检测到的 'pull'
                 weight_mark_in_center = False  # 当前帧 'weight mark' 是否在中心
@@ -337,7 +360,7 @@ def main_loop():
                     elif item["label"] == "weight mark":
                         x1, _, x2, _ = item["bbox"]
                         mark_center_x = (x1 + x2) / 2
-                        if window_width * 0.475 < mark_center_x < window_width * 0.525:  # 假设中心区域为47.5%到52.5%
+                        if window_width * 0.47 < mark_center_x < window_width * 0.52:  # 假设中心区域为47%到52%
                             weight_mark_in_center = True
 
                 if current_pull_item:
@@ -385,8 +408,8 @@ def main_loop():
                     # 'pull' 可见，但 'weight mark' 未在中央且未超时
                     elif pull_detected_timestamp_stage2 > 0:
                         time_since_pull_detected = time.time() - pull_detected_timestamp_stage2
-                        print(
-                            f"'pull' ({pull_item_info_stage2['bbox']}) 可见。等待 'weight mark' 出现在中央或 'pull' 超时 ({time_since_pull_detected:.2f}s / {PULL_CONFIRM_TIMEOUT_STAGE2}s)")
+                        # print(
+                        #     f"'pull' ({pull_item_info_stage2['bbox']}) 可见。等待 'weight mark' 出现在中央或 'pull' 超时 ({time_since_pull_detected:.2f}s / {PULL_CONFIRM_TIMEOUT_STAGE2}s)")
 
                 else:  # 当前帧未检测到 'pull'
                     if pull_item_info_stage2 is not None:  # 如果上一帧有 'pull'，现在没了
@@ -398,7 +421,7 @@ def main_loop():
 
             elif current_state == STATE_PULLING_ROD:
                 global is_mouse_pressed_stage3
-                print("状态: 拉杆中...")
+                print_state_info("状态: 拉杆中...")
 
                 bound_x = None
                 hook_out_x = None
@@ -419,9 +442,9 @@ def main_loop():
                     elif item["label"] == "bound blue":
                         bound_blue_visible = True
 
-                # Uncommented and added Stage3 marker
-                print(
-                    f"Debug (Stage3): bound_x={bound_x}, hook_out_x={hook_out_x}, hook_in_x={hook_in_x}, strong_pull_item={'Yes' if strong_pull_item else 'No'}, bound_blue_visible={bound_blue_visible}")
+                # # Uncommented and added Stage3 marker
+                # print(
+                #     f"Debug (Stage3): bound_x={bound_x}, hook_out_x={hook_out_x}, hook_in_x={hook_in_x}, strong_pull_item={'Yes' if strong_pull_item else 'No'}, bound_blue_visible={bound_blue_visible}")
 
                 if bound_x is not None or bound_blue_visible:
                     # 'bound' 或 'bound blue' 可见，重置消失计时器
@@ -470,7 +493,7 @@ def main_loop():
                     # 如果 'bound blue' 可见 (且没有 strong pull)，则暂停常规拉杆操作
                     # 注意: strong pull 逻辑优先，如果 strong pull 发生，这里的 continue 会跳过此块
                     if bound_blue_visible:  # This bound_blue_visible is from the main detection at start of STATE_PULLING_ROD
-                        print("'bound blue' 可见，暂停常规拉杆操作。")
+                        print_state_info("'bound blue' 可见，暂停常规拉杆操作。")
                         if is_mouse_pressed_stage3:  # 如果之前按下了鼠标，松开它
                             click_x_screen = int(
                                 window_origin[0] + img_pil.width * CLICK_POSITION_STAGE3_X_RATIO)
@@ -542,16 +565,16 @@ def main_loop():
                     if hooks_are_currently_visible:
                         if hook_out_x is not None and hook_out_x < bound_x:
                             current_decision_should_press = True
-                            print(
-                                f"hook_out_x ({hook_out_x:.2f}) < bound_x ({bound_x:.2f}) -> 决定按住")
+                            # print(
+                            #     f"hook_out_x ({hook_out_x:.2f}) < bound_x ({bound_x:.2f}) -> 决定按住")
                         elif hook_in_x is not None and hook_in_x < bound_x:
                             current_decision_should_press = True
-                            print(
-                                f"hook_in_x ({hook_in_x:.2f}) < bound_x ({bound_x:.2f}) -> 决定按住")
+                            # print(
+                            #     f"hook_in_x ({hook_in_x:.2f}) < bound_x ({bound_x:.2f}) -> 决定按住")
                         else:  # Hooks visible but conditions not met to press
                             current_decision_should_press = False
-                            print(
-                                f"hook_out/in_x >= bound_x (hook_out={hook_out_x}, hook_in={hook_in_x}, bound={bound_x}) -> 决定松开")
+                            # print(
+                            #     f"hook_out/in_x >= bound_x (hook_out={hook_out_x}, hook_in={hook_in_x}, bound={bound_x}) -> 决定松开")
                         last_known_should_press_stage3 = current_decision_should_press  # 更新记忆
                         final_action_should_press = current_decision_should_press
                     # Hooks not visible, but bound is. Maintain last known action.
@@ -633,8 +656,8 @@ def main_loop():
                             print("进入检查结果状态 (STATE_CHECK_RESULT)")
                             continue  # 跳过本轮后续逻辑
                         else:
-                            print(
-                                f"'bound'/'bound blue' 仍未出现，已等待 {time_elapsed_since_bound_gone:.2f}s...")
+                            # print(
+                            #     f"'bound'/'bound blue' 仍未出现，已等待 {time_elapsed_since_bound_gone:.2f}s...")
                             # 保持鼠标松开状态
                             if is_mouse_pressed_stage3:  # Should not happen if logic above is correct
                                 click_x_screen = int(
@@ -648,11 +671,11 @@ def main_loop():
 
             elif current_state == STATE_CHECK_RESULT:
                 if not initial_wait_done_stage4:
-                    print("状态: 检查结果 - 执行初始等待2秒...")
+                    print_state_info("状态: 检查结果 - 执行初始等待2秒...", force=True)
                     time.sleep(2)
                     initial_wait_done_stage4 = True
 
-                print("状态: 检查结果 - 持续检测 'start', 'stop', 'click'...")
+                print_state_info("状态: 检查结果 - 持续检测 'start', 'stop', 'click'...")
                 # 在此阶段，我们需要持续捕获屏幕并检测
                 img_pil_stage4, window_origin_stage4, _ = capture_window_client_area(
                     TARGET_WINDOW_NAME)
@@ -687,26 +710,26 @@ def main_loop():
                 if stop_item:
                     print("第四阶段：检测到 'stop' 项。执行复杂操作序列...")
 
-                    # a. 点击 "特定位置1"
+                    # a. 点击返回按钮
                     click_x_stop1 = int(
                         window_origin_stage4[0] + img_pil_stage4.width * CLICK_POSITION_STAGE4_STOP_X_RATIO)
                     click_y_stop1 = int(
                         window_origin_stage4[1] + img_pil_stage4.height * CLICK_POSITION_STAGE4_STOP_Y_RATIO)
                     click_at_screen_coords(click_x_stop1, click_y_stop1)
                     print(
-                        f"点击了 'stop' 后的特定位置1 ({click_x_stop1}, {click_y_stop1})。")
+                        f"点击了 'stop' 后的返回按钮 ({click_x_stop1}, {click_y_stop1})。")
                     time.sleep(2)  # 等待2秒，确保退出钓鱼界面
 
-                    # b. 点击 "特定位置2"
+                    # b. 点击地图
                     click_x_pos2 = int(
                         window_origin_stage4[0] + img_pil_stage4.width * CLICK_POS2_X_RATIO_AFTER_STOP)
                     click_y_pos2 = int(
                         window_origin_stage4[1] + img_pil_stage4.height * CLICK_POS2_Y_RATIO_AFTER_STOP)
                     click_at_screen_coords(click_x_pos2, click_y_pos2)
-                    print(f"点击了特定位置2 ({click_x_pos2}, {click_y_pos2})。")
+                    print(f"点击地图 ({click_x_pos2}, {click_y_pos2})。")
                     time.sleep(1)
 
-                    # c. & d. 从 "特定位置3" 拖拽到 "特定位置4"
+                    # c. & d. 拖拽地图比例尺
                     drag_x1 = int(
                         window_origin_stage4[0] + img_pil_stage4.width * DRAG_START_POS3_X_RATIO_AFTER_STOP)
                     drag_y1 = int(
