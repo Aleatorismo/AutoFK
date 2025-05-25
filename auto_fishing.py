@@ -1,3 +1,57 @@
+"""
+本脚本是一个自动化钓鱼程序，专为在 "BlueStacks App Player" 模拟器中运行的剑与远征启程游戏设计。
+它利用 YOLOv8 目标检测模型识别游戏中的特定元素，并结合 win32api 模拟鼠标操作，
+以实现自动化的钓鱼流程。
+
+主要运行逻辑分为以下几个阶段：
+
+程序初始化后，直接进入“等待拉钩与标记”阶段。
+
+第二阶段 (STATE_WAITING_FOR_WEIGHT_MARK):
+- 主要目标：检测到 "pull"（拉钩）以及可能的 "start"（开始按钮）和 "weight mark"（重量标记）。
+- 如果检测到 "start" 项，则点击该项，然后继续在本阶段内寻找 "pull"。
+- 如果检测到 "pull" 项：
+    - 若在 PULL_CONFIRM_TIMEOUT_STAGE2 (默认为0.5秒) 内未能检测到 "weight mark" 出现在窗口X轴中心区域，
+      则直接点击 "pull" 项，并转换到“拉杆”阶段。
+    - 若成功检测到 "weight mark" 且其位于窗口X轴中心区域，则点击 "pull" 项，并转换到“拉杆”阶段。
+
+第三阶段 (STATE_PULLING_ROD):
+- 主要目标：根据 "bound"（鱼钩判定圈）、"hook_out"（外圈鱼钩）、"hook_in"（内圈鱼钩）的相对位置控制鼠标按住或松开。
+- 核心逻辑：比较 "hook_out" 或 "hook_in" 的X轴中心坐标与 "bound" 的X轴中心坐标。
+    - 如果鱼钩坐标小于判定圈坐标，则在预设的特定屏幕位置按住鼠标左键。
+    - 反之，则松开鼠标左键。
+- 特殊情况处理：
+    - "strong pull"（强力拉杆）：一旦检测到 "strong pull" 项，立即点击该项。如果鼠标当前为按下状态，则先松开。
+      之后，程序会暂停所有常规拉杆操作，直至 "bound blue"（蓝色判定圈）项从视野中消失。
+    - "bound" 或 "bound blue" 消失：如果连续 BOUND_ABSENCE_TIMEOUT (默认为1秒) 未能检测到 "bound" 或 "bound blue" 项，
+      则认为一轮拉杆结束，进入“检查结果”阶段。
+
+第四阶段 (STATE_CHECK_RESULT):
+- 主要目标：根据钓鱼结束后的界面元素，决定下一步操作。
+- 初始等待：进入此阶段后，首先等待2秒。
+- 持续检测以下项目：
+    - "start"：如果检测到 "start" 项，点击该项，并返回第二阶段重新开始钓鱼。
+    - "click"：如果检测到 "click" 项（“点击空白处关闭” 字句），点击该项一次，然后继续在本阶段进行检测。
+    - "stop"：如果检测到 "stop" 项（鱼塘钓空后显示的锁头图标），执行一系列预设的点击和拖拽操作：
+        1. 点击左下角的返回按钮。
+        2. 打开地图。
+        3. 缩放地图至最小。
+        4. 查找并点击屏幕上出现的任一 "fish pool"（鱼塘）项。
+        5. 查找并点击 "pathfind"（自动寻路按钮）项。
+        6. 完成上述操作后，返回第二阶段，准备开始新的钓鱼流程。
+
+调试功能：
+- DEBUG_SHOW_DETECTIONS：若设置为 True，程序会额外创建一个名为 "YOLO Debug" 的窗口，
+  实时显示YOLO模型的检测结果（包括识别到的对象及其边界框），窗口大小会尝试匹配
+  "BlueStacks App Player" 窗口的客户区大小。按 'q'键可以关闭此调试窗口并退出程序。
+
+注意事项：
+- 坐标比例参数（如 CLICK_POSITION_STAGE3_X_RATIO）均基于目标窗口的客户区尺寸。
+- 时间参数（如 PULL_CONFIRM_TIMEOUT_STAGE2）控制着各状态转换和判断的延迟。
+- YOLO模型路径 (YOLO_MODEL_PATH) 和置信度阈值 (CONFIDENCE_THRESHOLD) 需要正确配置。
+- 由于使用了神经网络模型对游戏窗口内的项目进行识别和检测，因此可能出错或漏检，就目前最新训练的模型而言，'pathfind' 项很容易漏检。
+"""
+
 import time
 import win32api
 import win32con
@@ -286,7 +340,7 @@ def main_loop():
     print(f"直接进入第二阶段 (STATE_WAITING_FOR_WEIGHT_MARK)，初始状态: {current_state}")
 
     if DEBUG_SHOW_DETECTIONS:
-        cv2.namedWindow("YOLO Debug", cv2.WINDOW_NORMAL)
+        cv2.namedWindow("YOLO Debug", cv2.WINDOW_NORMAL)  # 创建可调整大小的窗口
 
     try:  # 将while True包裹在try中，以便finally可以执行
         while True:
@@ -318,10 +372,22 @@ def main_loop():
                         {"label": label, "confidence": conf, "bbox": [x1, y1, x2, y2]})
 
             if DEBUG_SHOW_DETECTIONS:
-                # 将PIL图像转换为OpenCV格式 (BGR)
-                img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
                 annotated_frame = results_raw[0].plot()  # 使用原始results对象进行绘制
-                cv2.imshow("YOLO Debug", annotated_frame)
+
+                # img_pil 在此处应不为 None (基于循环前面的检查)
+                target_window_width = img_pil.width
+                target_window_height = img_pil.height
+
+                # 调整 annotated_frame 的大小以确保其与目标窗口尺寸一致
+                # results_raw[0].plot() 通常返回与输入图像相同尺寸的图像
+                frame_to_show = cv2.resize(
+                    annotated_frame, (target_window_width, target_window_height))
+
+                cv2.imshow("YOLO Debug", frame_to_show)
+                # 显示图像后，显式调整窗口大小
+                cv2.resizeWindow(
+                    "YOLO Debug", target_window_width, target_window_height)
+
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     print("通过调试窗口的 'q' 键退出程序。")
                     break  # 退出主循环
@@ -348,7 +414,8 @@ def main_loop():
             #             break
 
             if current_state == STATE_WAITING_FOR_WEIGHT_MARK:  # 注意这里从 elif 改为 if，因为它是第一个活动状态检查
-                print_state_info("状态: 等待 'pull' 和 'weight mark'...")
+                print_state_info(
+                    "状态: 等待 'pull', 'weight mark' 或 'start'...")  # 更新打印信息
 
                 current_pull_item = None  # 当前帧检测到的 'pull'
                 weight_mark_in_center = False  # 当前帧 'weight mark' 是否在中心
@@ -357,6 +424,13 @@ def main_loop():
                 for item in detections:
                     if item["label"] == "pull":
                         current_pull_item = item
+                    elif item["label"] == "start":
+                        # 新增：检测 'start' 项
+                        # 原本这里是不需要检测 'start' 项的，但是自游戏更新 v1.4.1 之后，'start' 项会在自动寻路到鱼塘时出现
+                        print("第二阶段：检测到 'start' 项，点击该项...")
+                        click_item_center(item["bbox"], window_origin)
+                        # 点击 'start' 后，继续在同一次检测中寻找 'pull' 和 'weight mark'
+                        # 不改变当前状态，也不立即跳出循环或主逻辑
                     elif item["label"] == "weight mark":
                         x1, _, x2, _ = item["bbox"]
                         mark_center_x = (x1 + x2) / 2
@@ -433,16 +507,16 @@ def main_loop():
                 for item in detections:
                     if item["label"] == "bound":
                         bound_x = (item["bbox"][0] + item["bbox"][2]) / 2
-                    elif item["label"] == "hook_out":  # Changed "hook out" to "hook_out"
+                    elif item["label"] == "hook_out":  # 将 "hook out" 改为 "hook_out"
                         hook_out_x = (item["bbox"][0] + item["bbox"][2]) / 2
-                    elif item["label"] == "hook_in":   # Changed "hook in" to "hook_in"
+                    elif item["label"] == "hook_in":   # 将 "hook in" 改为 "hook_in"
                         hook_in_x = (item["bbox"][0] + item["bbox"][2]) / 2
                     elif item["label"] == "strong pull":
                         strong_pull_item = item  # 保存整个item以便点击
                     elif item["label"] == "bound blue":
                         bound_blue_visible = True
 
-                # # Uncommented and added Stage3 marker
+                # # Uncommented and added Stage3 marker -> # 取消注释并添加了 Stage3 标记
                 # print(
                 #     f"Debug (Stage3): bound_x={bound_x}, hook_out_x={hook_out_x}, hook_in_x={hook_in_x}, strong_pull_item={'Yes' if strong_pull_item else 'No'}, bound_blue_visible={bound_blue_visible}")
 
@@ -471,19 +545,19 @@ def main_loop():
                         print("点击了 'strong pull'。等待 'bound blue' 消失...")
                         # 等待 'bound blue' 消失的逻辑
                         while True:
-                            img_pil_sp, window_origin_sp, _ = capture_window_client_area(  # Adjusted to unpack 3 values
+                            img_pil_sp, window_origin_sp, _ = capture_window_client_area(  # 调整为解包3个值
                                 TARGET_WINDOW_NAME)
-                            if img_pil_sp is None or window_origin_sp is None:  # Ensure both are valid
+                            if img_pil_sp is None or window_origin_sp is None:  # 确保两者都有效
                                 time.sleep(0.1)
                                 continue
                             detections_sp = detect_objects(
                                 yolo_model, img_pil_sp, CONFIDENCE_THRESHOLD)
-                            current_bound_blue_visible_sp = any(  # Use a different variable name to avoid conflict
+                            current_bound_blue_visible_sp = any(  # 使用不同的变量名以避免冲突
                                 d["label"] == "bound blue" for d in detections_sp)
                             if not current_bound_blue_visible_sp:
                                 print("'bound blue' 已消失。")
                                 break
-                            print("仍然检测到 'bound blue'，继续等待...")
+                            print_state_info("仍然检测到 'bound blue'，继续等待...")
                             time.sleep(0.1)  # 短暂等待后重新检测
                         # 'bound blue' 消失后，脚本应继续在 STATE_PULLING_ROD 状态下运行
                         print("'strong pull' 处理完毕，将继续在拉杆状态下评估。")
@@ -492,7 +566,7 @@ def main_loop():
 
                     # 如果 'bound blue' 可见 (且没有 strong pull)，则暂停常规拉杆操作
                     # 注意: strong pull 逻辑优先，如果 strong pull 发生，这里的 continue 会跳过此块
-                    if bound_blue_visible:  # This bound_blue_visible is from the main detection at start of STATE_PULLING_ROD
+                    if bound_blue_visible:  # 此 bound_blue_visible 来自 STATE_PULLING_ROD 开始时的主要检测
                         print_state_info("'bound blue' 可见，暂停常规拉杆操作。")
                         if is_mouse_pressed_stage3:  # 如果之前按下了鼠标，松开它
                             click_x_screen = int(
@@ -556,7 +630,7 @@ def main_loop():
 
                     # --- 常规拉杆逻辑 ---
                     # (此逻辑在 "hook_out 卡住" 未触发 continue 时执行)
-                    # bound_x is not None is already guaranteed by the outer 'if bound_x is not None or bound_blue_visible:'
+                    # bound_x is not None is already guaranteed by the outer 'if bound_x is not None or bound_blue_visible:' 语句保证
 
                     current_decision_should_press = False  # 用于本帧基于可见元素的判断
                     hooks_are_currently_visible = (
@@ -571,23 +645,23 @@ def main_loop():
                             current_decision_should_press = True
                             # print(
                             #     f"hook_in_x ({hook_in_x:.2f}) < bound_x ({bound_x:.2f}) -> 决定按住")
-                        else:  # Hooks visible but conditions not met to press
+                        else:  # hook_in/hook_out 可见但未满足点击条件
                             current_decision_should_press = False
                             # print(
                             #     f"hook_out/in_x >= bound_x (hook_out={hook_out_x}, hook_in={hook_in_x}, bound={bound_x}) -> 决定松开")
                         last_known_should_press_stage3 = current_decision_should_press  # 更新记忆
                         final_action_should_press = current_decision_should_press
-                    # Hooks not visible, but bound is. Maintain last known action.
+                    # hook_in/hook_out不可见，但bound可见。保持最后一次的已知操作。
                     elif bound_x is not None:
-                        # This condition (bound_x is not None) is implicitly true if we are in this part of the code.
+                        # (bound_x is not None) 这个条件在代码的这部分隐式为 True。
                         final_action_should_press = last_known_should_press_stage3
                         print(
                             f"未检测到 'hook_out'/'hook_in' (bound={bound_x})。维持上一状态: {'按住' if final_action_should_press else '松开'}")
                     else:
-                        # This case should ideally not be reached if bound_x is None,
-                        # as the outer 'if bound_x is not None or bound_blue_visible:' would be false,
-                        # leading to the 'bound_absence_start_time' logic.
-                        # However, as a fallback, maintain last known state or default to release.
+                        # 如果 bound_x 为 None，理想情况下不应到达此情况，
+                        # 因为外部的 'if bound_x is not None or bound_blue_visible:' 将为 false，
+                        # 从而进入 'bound_absence_start_time' 逻辑。
+                        # 但是，为了以防万一，保持最后已知的状态或默认为松开。
                         final_action_should_press = last_known_should_press_stage3
                         print(
                             f"警告: hook 和 bound 均未明确检测到，维持上一状态: {'按住' if final_action_should_press else '松开'}")
@@ -659,7 +733,7 @@ def main_loop():
                             # print(
                             #     f"'bound'/'bound blue' 仍未出现，已等待 {time_elapsed_since_bound_gone:.2f}s...")
                             # 保持鼠标松开状态
-                            if is_mouse_pressed_stage3:  # Should not happen if logic above is correct
+                            if is_mouse_pressed_stage3:  # 如果前面的逻辑正确，这里鼠标不应是按下的状态
                                 click_x_screen = int(
                                     window_origin[0] + img_pil.width * CLICK_POSITION_STAGE3_X_RATIO)
                                 click_y_screen = int(
