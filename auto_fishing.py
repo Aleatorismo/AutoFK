@@ -49,7 +49,7 @@
 - 坐标比例参数（如 CLICK_POSITION_STAGE3_X_RATIO）均基于目标窗口的客户区尺寸。
 - 时间参数（如 PULL_CONFIRM_TIMEOUT_STAGE2）控制着各状态转换和判断的延迟。
 - YOLO模型路径 (YOLO_MODEL_PATH) 和置信度阈值 (CONFIDENCE_THRESHOLD) 需要正确配置。
-- 由于使用了神经网络模型对游戏窗口内的项目进行识别和检测，因此可能出错或漏检，就目前最新训练的模型而言，'pathfind' 项很容易漏检。
+- 由于使用了神经网络模型对游戏窗口内的项目进行识别和检测，因此可能出错或漏检。
 """
 
 import time
@@ -66,7 +66,7 @@ import cv2  # 新增导入
 # --- 配置参数 ---
 TARGET_WINDOW_NAME = "BlueStacks App Player"  # 目标窗口名称
 YOLO_MODEL_PATH = "yolo/models/best.pt"  # YOLOv8 模型路径
-CONFIDENCE_THRESHOLD = 0.8  # 置信度阈值
+CONFIDENCE_THRESHOLD = 0.5  # 置信度阈值
 STATE_IDLE = 0
 STATE_FISHING_START = 1
 STATE_WAITING_FOR_WEIGHT_MARK = 2
