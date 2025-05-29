@@ -39,7 +39,7 @@ GAME_WINDOW_TITLE = "BlueStacks App Player"
 # --- 调试选项 ---
 # 设置为整数可以直接从第几步开始，例如 DEBUG_START_STEP = 4 会从步骤4开始。
 # 设置为 None 或 1 则从头开始。
-DEBUG_START_STEP = 13
+DEBUG_START_STEP = None
 # --- 用户配置区域结束 --- #
 
 
@@ -446,17 +446,19 @@ class AutoLabyrinth:
 
             # --- 步骤 3 ---
             elif current_step == 3:
-                print("步骤 3: 附加挑战(4s, 可选C点) -> 战斗 -> 跳过 -> 回放(可选C点)。")
-                found_challenge_text, _ = self.wait_for_text_location(
-                    "附加挑战", timeout=4, interval=0.2, partial_match=True)
-                if found_challenge_text:
-                    print(f"找到“附加挑战”，点击特定位置 C ({self.specific_pos_c_px}).")
-                    self.click_at_relative(
-                        self.specific_pos_c_px[0], self.specific_pos_c_px[1])
-                else:
-                    print("步骤3: 4秒内未找到“附加挑战”，跳过点击C。")
+                # print("步骤 3: 附加挑战(4.5s, 可选C点) -> 战斗 -> 跳过 -> 回放(可选C点)。")
+                # found_challenge_text, _ = self.wait_for_text_location(
+                #     "附加挑战", timeout=4.5, interval=0.2, partial_match=True)
+                # if found_challenge_text:
+                #     print(f"找到“附加挑战”，点击特定位置 C ({self.specific_pos_c_px}).")
+                #     self.click_at_relative(
+                #         self.specific_pos_c_px[0], self.specific_pos_c_px[1])
+                # else:
+                #     print("步骤3: 4.5秒内未找到“附加挑战”，跳过点击C。")
 
-                time.sleep(0.3)  # 短暂间隔
+                # “附加挑战” 总是识别不到，索性直接放弃识别，因为 5 秒后这个界面会自动消失
+
+                time.sleep(4)  # 太快点击“战斗”可能会点不到
                 # 修改：先定位“战斗”，再点击特定位置
                 found_battle_text, _ = self.wait_for_text_location(
                     "战斗", timeout=10, partial_match=True)
@@ -482,26 +484,22 @@ class AutoLabyrinth:
 
             # --- 步骤 4 ---
             elif current_step == 4:
-                print("步骤 4: 检查“菲茨小店”和“烙印晶球”。")
-                time.sleep(3)  # 等待界面稳定
+                print("步骤 4: 检查是否存在“13/15”文本。")
+                time.sleep(1)  # 等待界面稳定，可以根据实际情况调整
                 img_s4 = self.capture_window()
                 ocr_s4 = self.perform_ocr(img_s4) if img_s4 is not None else []
 
-                # 检查是否找到“菲茨小店”
-                found_shop_locations = self.find_text_locations(
-                    ocr_s4, "菲茨小店", partial_match=True)
-                found_shop = bool(found_shop_locations)  # 如果列表不为空，则为True
+                # 检查是否找到“13/15”
+                # 使用 partial_match=False 进行精确匹配，如果需要部分匹配则改为True
+                found_13_15_locations = self.find_text_locations(
+                    ocr_s4, "13/15", partial_match=False)
+                found_13_15 = bool(found_13_15_locations)
 
-                # 检查是否找到“烙印晶球”
-                found_orb_locations = self.find_text_locations(
-                    ocr_s4, "烙印晶球", partial_match=True)
-                found_orb = bool(found_orb_locations)  # 如果列表不为空，则为True
-
-                if found_shop and found_orb:
-                    print("同时找到“菲茨小店”和“烙印晶球”。进入步骤 8。")
+                if found_13_15:
+                    print("找到“13/15”。进入步骤 8。")
                     current_step = 8
                 else:
-                    print("未同时找到“菲茨小店”和“烙印晶球”。进入步骤 5。")
+                    print("未找到“13/15”。进入步骤 5。")
                     current_step = 5
                 step_executed_successfully = True  # 这是一个导航步骤，总是“成功”
 
@@ -542,18 +540,19 @@ class AutoLabyrinth:
 
             # --- 步骤 6 --- (与步骤3逻辑类似)
             elif current_step == 6:
-                print("步骤 6: 附加挑战(4s, 可选C点) -> 战斗 -> 跳过 -> 回放(可选C点)。")
-                found_challenge_s6, _ = self.wait_for_text_location(
-                    "附加挑战", timeout=4, interval=0.2, partial_match=True)
-                if found_challenge_s6:
-                    print(f"找到“附加挑战”，点击特定位置 C ({self.specific_pos_c_px}).")
-                    self.click_at_relative(
-                        self.specific_pos_c_px[0], self.specific_pos_c_px[1])
-                else:
-                    print("步骤6: 4秒内未找到“附加挑战”。")
+                # print("步骤 6: 附加挑战(4.5s, 可选C点) -> 战斗 -> 跳过 -> 回放(可选C点)。")
+                # found_challenge_s6, _ = self.wait_for_text_location(
+                #     "附加挑战", timeout=4.5, interval=0.2, partial_match=True)
+                # if found_challenge_s6:
+                #     print(f"找到“附加挑战”，点击特定位置 C ({self.specific_pos_c_px}).")
+                #     self.click_at_relative(
+                #         self.specific_pos_c_px[0], self.specific_pos_c_px[1])
+                # else:
+                #     print("步骤6: 4.5秒内未找到“附加挑战”。")
 
-                time.sleep(0.3)
-                # 修改：先定位“战斗”，再点击特定位置
+                # “附加挑战” 总是识别不到，索性直接放弃识别，因为 5 秒后这个界面会自动消失
+
+                time.sleep(5)  # 太快点击“战斗”可能会点不到
                 found_battle_s6, _ = self.wait_for_text_location(
                     "战斗", timeout=10, partial_match=True)
                 if found_battle_s6:
@@ -786,19 +785,19 @@ class AutoLabyrinth:
                 else:
                     print("未直接找到“结束探索”。尝试选择烙印流程...")
 
-                    # Loop for selecting sigils, potentially multiple times
-                    max_sigil_selection_attempts = 4  # Prevent infinite loops
+                    # 循环选择烙印，可能会多次
+                    max_sigil_selection_attempts = 4  # 防止无限循环
                     sigil_selection_attempts = 0
-                    # This flag will be true if the step completes by going to step 1 or 4 successfully.
-                    # It's used to determine if the max_attempts fallback is needed.
-                    # step_executed_successfully is already defined outside, we'll use it.
+                    # 如果步骤通过成功跳转到步骤1或步骤4来完成，则此标志为true。
+                    # 用于确定是否需要max_attempts回退。
+                    # step_executed_successfully 已在外部定义，我们将使用它。
 
                     while sigil_selection_attempts < max_sigil_selection_attempts and not step_executed_successfully:
                         sigil_selection_attempts += 1
                         print(
                             f"步骤13: 烙印选择尝试 #{sigil_selection_attempts} / {max_sigil_selection_attempts}")
 
-                        # Get fresh screen for each sigil selection attempt
+                        # 每次尝试选择烙印时获取新的屏幕截图
                         img_s13_brand_select = self.capture_window()
                         ocr_s13_brand_select = self.perform_ocr(
                             img_s13_brand_select) if img_s13_brand_select is not None else []
@@ -812,25 +811,25 @@ class AutoLabyrinth:
                                 break
 
                         if clicked_brand_in_this_attempt:
-                            time.sleep(0.5)  # Wait for click to register
-                            # After clicking a brand, look for "确认"
+                            time.sleep(0.5)  # 等待点击生效
+                            # 点击烙印后，查找“确认”
                             if self.wait_for_text_and_click("确认", timeout=5, partial_match=True):
                                 print("步骤13: 已点击“确认”(烙印选择后)。")
-                                # Wait for UI to update after "确认"
+                                # 等待“确认”后UI更新
                                 time.sleep(1.0)
 
-                                # Check if "选择烙印" appears again
-                                # Use a short timeout for this check as per requirement
+                                # 检查“选择烙印”是否再次出现
+                                # 根据要求，对此检查使用较短的超时时间
                                 found_select_sigil_again, _ = self.wait_for_text_location(
                                     "选择烙印", timeout=1.0, interval=0.2)
 
                                 if found_select_sigil_again:
                                     print("步骤13: 检测到“选择烙印”再次出现，将重新进行烙印选择。")
-                                    # The loop `while sigil_selection_attempts < max_sigil_selection_attempts:` will continue
-                                    # No change to step_executed_successfully yet, as we are looping within step 13.
-                                    continue  # Go to the next iteration of the sigil selection loop
+                                    # `while sigil_selection_attempts < max_sigil_selection_attempts:` 循环将继续
+                                    # step_executed_successfully 尚未更改，因为我们正在步骤13内循环。
+                                    continue  # 进入烙印选择循环的下一次迭代
                                 else:
-                                    # "选择烙印" not found, so assume selection is done. Try to "结束探索".
+                                    # 未找到“选择烙印”，因此假定选择已完成。尝试“结束探索”。
                                     print("步骤13: 未再检测到“选择烙印”，尝试结束探索。")
                                     if self.wait_for_text_and_click("结束探索", timeout=5, partial_match=True):
                                         print("步骤13: 确认选择烙印后，已点击“结束探索”。返回步骤1。")
@@ -838,10 +837,10 @@ class AutoLabyrinth:
                                         step_executed_successfully = True
                                     else:
                                         print("步骤13: 确认选择烙印后，未能点击“结束探索”。返回步骤4。")
-                                        current_step = 4  # Fallback
-                                        step_executed_successfully = True  # Mark as handled by fallback
-                                    break  # Exit sigil selection loop, as we've either finished or hit a fallback
-                            else:  # Failed to click "确认"
+                                        current_step = 4  # 回退
+                                        step_executed_successfully = True  # 标记为已由回退处理
+                                    break  # 退出烙印选择循环，因为我们已完成或遇到回退
+                            else:  # 未能点击“确认”
                                 print("步骤13: 点击烙印品质后，未找到“确认”。尝试直接结束探索。")
                                 if self.wait_for_text_and_click("结束探索", timeout=3, partial_match=True):
                                     print("步骤13: 无法确认烙印，但成功点击“结束探索”。返回步骤1。")
@@ -850,11 +849,11 @@ class AutoLabyrinth:
                                 else:
                                     print("步骤13: 无法确认烙印，也无法结束探索。返回步骤4。")
                                     current_step = 4
-                                    step_executed_successfully = True  # Mark as handled by fallback
-                                break  # Exit sigil selection loop
-                        else:  # No brand of specified quality was found and clicked in this attempt
+                                    step_executed_successfully = True  # 标记为已由回退处理
+                                break  # 退出烙印选择循环
+                        else:  # 在此尝试中未找到并点击指定质量的烙印
                             print("步骤13: 本轮未找到任何优先级的烙印可点击。尝试结束探索。")
-                            # Use current OCR
+                            # 使用当前的OCR数据
                             if self.wait_for_text_and_click("结束探索", timeout=5, ocr_data=ocr_s13_brand_select, partial_match=True):
                                 print("步骤13: 未选择新烙印，已点击“结束探索”。返回步骤1。")
                                 current_step = 1
@@ -870,17 +869,17 @@ class AutoLabyrinth:
                                     step_executed_successfully = True
                                 else:
                                     print("步骤13: 所有尝试失败（无烙印可选，结束探索也失败）。返回步骤4。")
-                                    current_step = 4  # Final fallback
-                                    step_executed_successfully = True  # Mark as handled by fallback
-                            break  # Exit sigil selection loop
+                                    current_step = 4  # 最终回退
+                                    step_executed_successfully = True  # 标记为已由回退处理
+                            break  # 退出烙印选择循环
 
-                    # After the sigil selection loop (if it broke, or max attempts reached)
+                    # 烙印选择循环之后（如果中断或达到最大尝试次数）
                     if not step_executed_successfully:
-                        # This means the loop finished due to max_attempts without successfully setting current_step and step_executed_successfully
+                        # 这意味着循环由于达到max_attempts而结束，但未成功设置current_step和step_executed_successfully
                         print(
                             f"步骤13: 烙印选择达到最大尝试次数 ({max_sigil_selection_attempts}) 仍未成功结束探索。返回步骤4。")
                         current_step = 4
-                        step_executed_successfully = True  # Mark as handled by fallback
+                        step_executed_successfully = True  # 标记为已由回退处理
 
             # --- 步骤失败处理和重置 ---
             # 为了防止某些步骤卡住，增加失败计数和重置机制
