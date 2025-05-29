@@ -4,6 +4,8 @@
 
 import keyboard
 import win32gui
+import win32ui  # 添加导入
+import win32con  # 添加导入
 import datetime
 import os
 from PIL import Image
@@ -36,6 +38,25 @@ def get_window_rect(window_name):
     return (x, y, width, height), hwnd
 
 
+def get_next_filename(save_dir):
+    """获取下一个截图文件名"""
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    existing_files = os.listdir(save_dir)
+    max_num = 0
+    for f_name in existing_files:
+        if f_name.endswith(".png"):
+            try:
+                num = int(os.path.splitext(f_name)[0])
+                if num > max_num:
+                    max_num = num
+            except ValueError:
+                # 文件名不是纯数字，忽略
+                pass
+    return os.path.join(save_dir, f"{max_num + 1}.png")
+
+
 def capture_window(window_name):
     """对指定窗口进行截图并保存"""
     rect, hwnd = get_window_rect(window_name)
@@ -43,8 +64,9 @@ def capture_window(window_name):
         return
 
     x, y, width, height = rect
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{SAVE_DIR}/screenshot_{timestamp}.png"
+    # timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # filename = f"{SAVE_DIR}/screenshot_{timestamp}.png"
+    filename = get_next_filename(SAVE_DIR)
 
     try:
         # 使用mss库进行截图，更好地支持多显示器

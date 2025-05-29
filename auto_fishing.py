@@ -66,7 +66,7 @@ import cv2  # 新增导入
 # --- 配置参数 ---
 TARGET_WINDOW_NAME = "BlueStacks App Player"  # 目标窗口名称
 YOLO_MODEL_PATH = "yolo/models/best.pt"  # YOLOv8 模型路径
-CONFIDENCE_THRESHOLD = 0.5  # 置信度阈值
+CONFIDENCE_THRESHOLD = 0.7  # 置信度阈值
 STATE_IDLE = 0
 STATE_FISHING_START = 1
 STATE_WAITING_FOR_WEIGHT_MARK = 2
