@@ -179,3 +179,5 @@ yolo/datasets/
 yolo/labelImg_v1.8.1/
 yolo/runs/
 yolo/screenshots/
+paddleocr/screenshots/
+*.bat

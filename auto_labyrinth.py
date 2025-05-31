@@ -387,7 +387,6 @@ class AutoLabyrinth:
                 print(
                     f"--- 警告: 无效的 DEBUG_START_STEP ({DEBUG_START_STEP})。将从步骤 1 开始。 ---")
 
-        last_gate_choice = None  # 用于步骤7的判断
         self.last_brand_clicked_in_step9 = None  # 新增：记录步骤9点击的烙印
         consecutive_step_failures = {
             step: 0 for step in range(1, 14)}  # 记录每个步骤连续失败的次数
@@ -395,7 +394,7 @@ class AutoLabyrinth:
 
         while True:
             print(
-                f"\n--- 主循环 | 当前步骤: {current_step} | 上次选择的门: {last_gate_choice} ---")
+                f"\n--- 主循环 | 当前步骤: {current_step} ---")
 
             # 每次循环开始时检查窗口状态
             if not self.hwnd or not win32gui.IsWindow(self.hwnd) or not self.get_window_rect():
@@ -478,7 +477,7 @@ class AutoLabyrinth:
                         print(f"找到“回放”，点击特定位置 C ({self.specific_pos_c_px}).")
                         self.click_at_relative(
                             self.specific_pos_c_px[0], self.specific_pos_c_px[1])
-                    current_step = 4
+                    current_step = 5
                     step_executed_successfully = True
                 else:
                     print("步骤3: 未找到“战斗”。")
@@ -506,13 +505,13 @@ class AutoLabyrinth:
 
             # --- 步骤 5 ---
             elif current_step == 5:
-                print("步骤 5: 选择门 (优先级: 馈赠>晶粹>遗物>精英)，点击相对Y偏移位置。")
-                gate_priority = ["馈赠之门", "晶粹之门", "遗物之门", "精英"]  # 优先级从高到低
+                print("步骤 5: 选择门 (优先级: 馈赠>晶粹>遗物>精英>道具)，点击相对Y偏移位置。")
+                gate_priority = ["馈赠之门", "晶粹之门",
+                                 "遗物之门", "精英", "道具之门"]  # 优先级从高到低
                 time.sleep(0.5)
                 img_s5 = self.capture_window()
                 ocr_s5 = self.perform_ocr(img_s5) if img_s5 is not None else []
 
-                chosen_gate_text = None
                 clicked_this_step = False
                 for gate_type in gate_priority:
                     # 对于门和精英，我们可能需要精确匹配，或者至少是包含这些核心词
@@ -527,8 +526,6 @@ class AutoLabyrinth:
                             f"最高优先级选择: '{gate_type}'。点击其下方 {self.y_offset_gate_px} 像素。")
                         self.click_at_relative(
                             loc_to_click[0], loc_to_click[1], y_offset=self.y_offset_gate_px)
-                        last_gate_choice = gate_type  # 记录本次选择，用于步骤7
-                        chosen_gate_text = gate_type
                         clicked_this_step = True
                         break  # 找到最高优先级的就执行并跳出循环
 
@@ -554,16 +551,56 @@ class AutoLabyrinth:
                 # “附加挑战” 总是识别不到，索性直接放弃识别，因为 5 秒后这个界面会自动消失
 
                 time.sleep(5)  # 太快点击“战斗”可能会点不到
-                found_battle_s6, _ = self.wait_for_text_location(
-                    "战斗", timeout=10, partial_match=True)
-                if found_battle_s6:
-                    print(f"找到“战斗”，点击特定位置 ({self.specific_pos_battle_px})。")
-                    self.click_at_relative(
-                        self.specific_pos_battle_px[0], self.specific_pos_battle_px[1])
+                # 修改: 获取所有“战斗”出现的位置
+                found_battle_s6_text, battle_s6_locations = self.wait_for_text_location(
+                    "战斗", timeout=10, partial_match=True, find_all_occurrences=True)  # 获取所有匹配项
+
+                action_after_battle_check_s6 = False  # 标记是否执行战斗后的操作
+
+                if found_battle_s6_text and battle_s6_locations:  # 确保找到了文本且有位置信息
+                    if self.window_rect and self.window_rect.get("height") and self.window_rect["height"] > 0:
+                        window_height = self.window_rect["height"]
+                        lower_third_threshold = window_height * 2 / 3
+
+                        for loc in battle_s6_locations:  # 遍历所有找到的“战斗”位置
+                            battle_y_coord = loc[1]  # 获取当前“战斗”的Y坐标
+                            if battle_y_coord > lower_third_threshold:
+                                print(
+                                    f"步骤6: 找到“战斗”于Y={battle_y_coord} (窗口下方1/3区域，阈值 > {lower_third_threshold:.0f})。点击特定位置 ({self.specific_pos_battle_px})。")
+                                self.click_at_relative(
+                                    self.specific_pos_battle_px[0], self.specific_pos_battle_px[1])
+                                action_after_battle_check_s6 = True
+                                break  # 只要有一个符合条件就点击并跳出循环
+
+                        if not action_after_battle_check_s6:  # 如果循环结束都没有点击
+                            print(
+                                f"步骤6: 找到 {len(battle_s6_locations)} 处“战斗”，但均不在窗口下方1/3区域 (阈值 > {lower_third_threshold:.0f})。不点击。")
+                    else:
+                        print("步骤6: 无法获取有效窗口高度以验证“战斗”位置。不点击。")
+
+                if action_after_battle_check_s6:
                     time.sleep(0.5)
-                    self.wait_for_text_and_click(
-                        "跳过", timeout=10, optional=True, partial_match=True)
-                    time.sleep(0.3)
+                    # 新的“跳过”逻辑
+                    print("步骤6: 第一次尝试点击“跳过”(4秒超时)...")
+                    clicked_skip_attempt1 = self.wait_for_text_and_click(
+                        "跳过", timeout=4, optional=False, partial_match=True)
+
+                    if not clicked_skip_attempt1:
+                        print("步骤6: 第一次尝试点击“跳过”失败或超时。将再次点击战斗按钮并重试“跳过”。")
+                        self.click_at_relative(
+                            self.specific_pos_battle_px[0], self.specific_pos_battle_px[1])
+                        time.sleep(0.5)  # 点击战斗按钮后稍作等待
+
+                        print("步骤6: 第二次尝试点击“跳过”(4秒超时, 可选)...")
+                        # 第二次尝试可以是可选的，如果仍然找不到，就继续
+                        if self.wait_for_text_and_click("跳过", timeout=4, optional=True, partial_match=True):
+                            print("步骤6: 第二次尝试点击“跳过”成功。")
+                        else:
+                            print("步骤6: 第二次尝试点击“跳过”也失败或超时。")
+                    else:
+                        print("步骤6: 第一次尝试点击“跳过”成功。")
+
+                    time.sleep(0.3)  # 在检查“回放”之前等待
                     found_replay_s6, _ = self.wait_for_text_location(
                         "回放", timeout=10, interval=0.2, partial_match=True)
                     if found_replay_s6:
@@ -580,104 +617,96 @@ class AutoLabyrinth:
                     current_step = 7
                     step_executed_successfully = True
                 else:
-                    print("步骤6: 未找到“战斗”。")
+                    print("步骤6: 未找到“战斗”或未满足点击条件。")
+                    # step_executed_successfully 保持 False
 
             # --- 步骤 7 ---
             elif current_step == 7:
-                print(f"步骤 7: 条件检查。上次选择: '{last_gate_choice}'.")
                 # step_executed_successfully 将在此块的末尾设置
 
-                # 1. 首先确认上一个门是否是遗物之门/精英
-                if not (last_gate_choice == "遗物之门" or last_gate_choice == "精英"):
-                    print(
-                        f"步骤7: 上次选择不是“遗物之门”或“精英” (是'{last_gate_choice}')。直接前往步骤4。")
+                # 新增：检查是否意外返回到了英雄选择界面
+                print("步骤7: 检查是否出现“英雄”文本 (2.5s超时)...")
+                found_hero_early, _ = self.wait_for_text_location(
+                    "英雄", timeout=2.5, interval=0.2, partial_match=True)
+                if found_hero_early:
+                    print("步骤7: 检测到“英雄”，返回步骤4。")
                     current_step = 4
                     step_executed_successfully = True
                 else:
-                    # 2. 如果是遗物之门/精英，尝试在几秒内找到“选择烙印” (初始检查)
-                    print(
-                        f"步骤7: 上次为 '{last_gate_choice}'。现在查找“选择烙印” (初始检查, 4.5s超时)...")
-                    found_initial_select_sigil, _ = self.wait_for_text_location(
-                        "选择烙印", timeout=4.5, interval=0.3, partial_match=True)
+                    # 2. 进入遗物选择循环
+                    time.sleep(2)  # 等待界面稳定
+                    print("步骤7: 找到“选择烙印”。开始遗物选择循环...")
+                    max_relic_selection_attempts = 3  # 最多尝试3次选择遗物
+                    relic_selection_attempts = 0
+                    # 这个标志用于判断在循环结束后，是否是因为“选择烙印”仍然存在而退出的
+                    select_sigil_still_present_after_loop = False
 
-                    if not found_initial_select_sigil:
-                        print("步骤7: 初始检查未在4.5秒内找到“选择烙印”。前往步骤4。")
-                        current_step = 4
-                        step_executed_successfully = True
-                    else:
-                        # 3. 进入遗物选择循环
-                        print("步骤7: 找到“选择烙印”。开始遗物选择循环...")
-                        max_relic_selection_attempts = 3  # 最多尝试3次选择遗物
-                        relic_selection_attempts = 0
-                        # 这个标志用于判断在循环结束后，是否是因为“选择烙印”仍然存在而退出的
-                        select_sigil_still_present_after_loop = False
+                    while relic_selection_attempts < max_relic_selection_attempts:
+                        relic_selection_attempts += 1
+                        print(
+                            f"步骤7: 遗物选择尝试 #{relic_selection_attempts}/{max_relic_selection_attempts}")
+                        select_sigil_still_present_after_loop = False  # 重置标志
 
-                        while relic_selection_attempts < max_relic_selection_attempts:
-                            relic_selection_attempts += 1
-                            print(
-                                f"步骤7: 遗物选择尝试 #{relic_selection_attempts}/{max_relic_selection_attempts}")
-                            select_sigil_still_present_after_loop = False  # 重置标志
+                        # 每次循环开始时，重新捕获屏幕以获取最新的遗物选项
+                        print("步骤7: 正在捕获当前遗物选项...")
+                        time.sleep(0.5)  # 给UI一点时间刷新（如果“选择烙印”刚重新出现）
+                        img_relic_options = self.capture_window()
+                        if img_relic_options is None:
+                            print("步骤7: 捕获遗物选项截图失败。结束遗物选择循环。")
+                            break  # 退出 while 循环
 
-                            # 每次循环开始时，重新捕获屏幕以获取最新的遗物选项
-                            print("步骤7: 正在捕获当前遗物选项...")
-                            time.sleep(0.5)  # 给UI一点时间刷新（如果“选择烙印”刚重新出现）
-                            img_relic_options = self.capture_window()
-                            if img_relic_options is None:
-                                print("步骤7: 捕获遗物选项截图失败。结束遗物选择循环。")
-                                break  # 退出 while 循环
+                        ocr_relic_options = self.perform_ocr(
+                            img_relic_options)
+                        if not ocr_relic_options:  # 检查OCR结果是否为空
+                            print("步骤7: OCR未能从遗物选项截图中识别任何文本。结束遗物选择循环。")
+                            break  # 退出 while 循环
 
-                            ocr_relic_options = self.perform_ocr(
-                                img_relic_options)
-                            if not ocr_relic_options:  # 检查OCR结果是否为空
-                                print("步骤7: OCR未能从遗物选项截图中识别任何文本。结束遗物选择循环。")
-                                break  # 退出 while 循环
+                        # 4. 选择遗物 ("史诗" > "精英" > "稀有")
+                        print("步骤7: 选择遗物 (优先级: 史诗 > 精英 > 稀有)...")
+                        relic_priority = ["史诗", "精英", "稀有"]
+                        clicked_relic_this_attempt = False
 
-                            # 4. 选择遗物 ("史诗" > "精英" > "稀有")
-                            print("步骤7: 选择遗物 (优先级: 史诗 > 精英 > 稀有)...")
-                            relic_priority = ["史诗", "精英", "稀有"]
-                            clicked_relic_this_attempt = False
+                        for quality in relic_priority:
+                            # 使用 partial_match=False 进行精确品质匹配
+                            if self.click_text(quality, ocr_data=ocr_relic_options, partial_match=False):
+                                print(f"步骤7: 已点击遗物品质: '{quality}'.")
+                                clicked_relic_this_attempt = True
+                                break  # 跳出遗物品质选择 for 循环
 
-                            for quality in relic_priority:
-                                # 使用 partial_match=False 进行精确品质匹配
-                                if self.click_text(quality, ocr_data=ocr_relic_options, partial_match=False):
-                                    print(f"步骤7: 已点击遗物品质: '{quality}'.")
-                                    clicked_relic_this_attempt = True
-                                    break  # 跳出遗物品质选择 for 循环
+                        if not clicked_relic_this_attempt:
+                            print("步骤7: 本轮尝试未能选择任何优先级的遗物。结束遗物选择循环。")
+                            break  # 退出 while 循环
 
-                            if not clicked_relic_this_attempt:
-                                print("步骤7: 本轮尝试未能选择任何优先级的遗物。结束遗物选择循环。")
-                                break  # 退出 while 循环
+                        # 点击 "确认"
+                        time.sleep(0.5)  # 等待遗物点击生效
+                        if self.wait_for_text_and_click("确认", timeout=5, partial_match=True):
+                            print("步骤7: 已点击“确认”(在选择遗物之后)。")
+                            time.sleep(1.0)  # 等待UI更新，例如“选择烙印”文本可能消失或重新出现
 
-                            # 点击 "确认"
-                            time.sleep(0.5)  # 等待遗物点击生效
-                            if self.wait_for_text_and_click("确认", timeout=5, partial_match=True):
-                                print("步骤7: 已点击“确认”(在选择遗物之后)。")
-                                time.sleep(1.0)  # 等待UI更新，例如“选择烙印”文本可能消失或重新出现
+                            # 5. 检查“选择烙印”是否再次出现 (1s超时)
+                            print("步骤7: 检查“选择烙印”是否再次出现 (1s超时)...")
+                            found_select_sigil_again, _ = self.wait_for_text_location(
+                                "选择烙印", timeout=3.0, interval=0.2, partial_match=True)
 
-                                # 5. 检查“选择烙印”是否再次出现 (1s超时)
-                                print("步骤7: 检查“选择烙印”是否再次出现 (1s超时)...")
-                                found_select_sigil_again, _ = self.wait_for_text_location(
-                                    "选择烙印", timeout=3.0, interval=0.2, partial_match=True)
-
-                                if found_select_sigil_again:
-                                    print("步骤7: 检测到“选择烙印”再次出现。将继续下一轮遗物选择。")
-                                    select_sigil_still_present_after_loop = True  # 标记以便在循环结束时检查
-                                    # 继续 while 循环的下一次迭代
-                                else:
-                                    print("步骤7: 未再检测到“选择烙印”。认为遗物选择已完成。")
-                                    break  # 退出 while 循环
+                            if found_select_sigil_again:
+                                print("步骤7: 检测到“选择烙印”再次出现。将继续下一轮遗物选择。")
+                                select_sigil_still_present_after_loop = True  # 标记以便在循环结束时检查
+                                # 继续 while 循环的下一次迭代
                             else:
-                                print("步骤7: 点击遗物后未能找到或点击“确认”。结束遗物选择循环。")
+                                print("步骤7: 未再检测到“选择烙印”。认为遗物选择已完成。")
                                 break  # 退出 while 循环
+                        else:
+                            print("步骤7: 点击遗物后未能找到或点击“确认”。结束遗物选择循环。")
+                            break  # 退出 while 循环
 
-                        # while 循环结束后 (无论是正常结束、break跳出还是达到max_attempts)
-                        if relic_selection_attempts == max_relic_selection_attempts and select_sigil_still_present_after_loop:
-                            print(
-                                f"步骤7: 遗物选择达到最大尝试次数 ({max_relic_selection_attempts})，但“选择烙印”在最后一次检查时仍存在。")
+                    # while 循环结束后 (无论是正常结束、break跳出还是达到max_attempts)
+                    if relic_selection_attempts == max_relic_selection_attempts and select_sigil_still_present_after_loop:
+                        print(
+                            f"步骤7: 遗物选择达到最大尝试次数 ({max_relic_selection_attempts})，但“选择烙印”在最后一次检查时仍存在。")
 
-                        print("步骤7: 遗物选择流程结束。前往步骤4。")
-                        current_step = 4
-                        step_executed_successfully = True
+                    print("步骤7: 遗物选择流程结束。前往步骤4。")
+                    current_step = 4
+                    step_executed_successfully = True
 
             # --- 步骤 8 ---
             elif current_step == 8:
