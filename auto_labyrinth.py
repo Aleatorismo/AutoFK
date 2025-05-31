@@ -388,6 +388,7 @@ class AutoLabyrinth:
                     f"--- 警告: 无效的 DEBUG_START_STEP ({DEBUG_START_STEP})。将从步骤 1 开始。 ---")
 
         last_gate_choice = None  # 用于步骤7的判断
+        self.last_brand_clicked_in_step9 = None  # 新增：记录步骤9点击的烙印
         consecutive_step_failures = {
             step: 0 for step in range(1, 14)}  # 记录每个步骤连续失败的次数
         MAX_FAILURES_PER_STEP = 3  # 每个步骤允许的最大连续失败次数，超过则可能重置
@@ -583,47 +584,100 @@ class AutoLabyrinth:
 
             # --- 步骤 7 ---
             elif current_step == 7:
-                print(
-                    f"步骤 7: 若上次是“遗物之门”或“精英”(当前: '{last_gate_choice}')，选遗物(史诗>精英>稀有) -> 确认。否则回步骤4。")
-                if last_gate_choice == "遗物之门" or last_gate_choice == "精英":
-                    relic_priority = ["史诗", "精英", "稀有"]  # 遗物品质优先级
-                    clicked_relic = False
-                    # 等待遗物选择界面出现并进行OCR
-                    relic_screen_scan_timeout = 7  # 给遗物界面加载和OCR一点时间
-                    relic_scan_start_time = time.time()
-                    ocr_s7_relic = []
-                    while time.time() - relic_scan_start_time < relic_screen_scan_timeout:
-                        img_s7_relic = self.capture_window()
-                        ocr_s7_relic = self.perform_ocr(
-                            img_s7_relic) if img_s7_relic is not None else []
-                        for quality in relic_priority:
-                            # 精确匹配品质文字
-                            if self.click_text(quality, ocr_data=ocr_s7_relic, partial_match=False):
-                                print(f"已点击遗物品质: '{quality}'.")
-                                clicked_relic = True
-                                break
-                        if clicked_relic:
-                            break  # 已点击，跳出外层while
-                        time.sleep(0.5)  # 扫描间隔
+                print(f"步骤 7: 条件检查。上次选择: '{last_gate_choice}'.")
+                # step_executed_successfully 将在此块的末尾设置
 
-                    if clicked_relic:
-                        time.sleep(0.5)  # 等待点击生效
-                        if self.wait_for_text_and_click("确认", timeout=5, partial_match=True):
-                            print("已点击“确认”(遗物选择)。")
-                            step_executed_successfully = True
-                        else:
-                            print("步骤7: 点击遗物后未找到“确认”。")
-                            # 即使没点到确认，也可能需要回到步骤4，避免卡死
-                    else:
-                        print("步骤7: 未能选择遗物品质（超时或未找到）。")
-                        # 未选择遗物，也应该回到步骤4
-                else:
+                # 1. 首先确认上一个门是否是遗物之门/精英
+                if not (last_gate_choice == "遗物之门" or last_gate_choice == "精英"):
                     print(
-                        f"步骤7: 上次选择不是“遗物之门” (是'{last_gate_choice}')。直接返回步骤4。")
-                    step_executed_successfully = True  # 这是一个正确的逻辑分支
+                        f"步骤7: 上次选择不是“遗物之门”或“精英” (是'{last_gate_choice}')。直接前往步骤4。")
+                    current_step = 4
+                    step_executed_successfully = True
+                else:
+                    # 2. 如果是遗物之门/精英，尝试在几秒内找到“选择烙印” (初始检查)
+                    print(
+                        f"步骤7: 上次为 '{last_gate_choice}'。现在查找“选择烙印” (初始检查, 4.5s超时)...")
+                    found_initial_select_sigil, _ = self.wait_for_text_location(
+                        "选择烙印", timeout=4.5, interval=0.3, partial_match=True)
 
-                current_step = 4  # 无论如何都回到步骤4
-                time.sleep(0.5)  # 给界面一点反应时间
+                    if not found_initial_select_sigil:
+                        print("步骤7: 初始检查未在4.5秒内找到“选择烙印”。前往步骤4。")
+                        current_step = 4
+                        step_executed_successfully = True
+                    else:
+                        # 3. 进入遗物选择循环
+                        print("步骤7: 找到“选择烙印”。开始遗物选择循环...")
+                        max_relic_selection_attempts = 3  # 最多尝试3次选择遗物
+                        relic_selection_attempts = 0
+                        # 这个标志用于判断在循环结束后，是否是因为“选择烙印”仍然存在而退出的
+                        select_sigil_still_present_after_loop = False
+
+                        while relic_selection_attempts < max_relic_selection_attempts:
+                            relic_selection_attempts += 1
+                            print(
+                                f"步骤7: 遗物选择尝试 #{relic_selection_attempts}/{max_relic_selection_attempts}")
+                            select_sigil_still_present_after_loop = False  # 重置标志
+
+                            # 每次循环开始时，重新捕获屏幕以获取最新的遗物选项
+                            print("步骤7: 正在捕获当前遗物选项...")
+                            time.sleep(0.5)  # 给UI一点时间刷新（如果“选择烙印”刚重新出现）
+                            img_relic_options = self.capture_window()
+                            if img_relic_options is None:
+                                print("步骤7: 捕获遗物选项截图失败。结束遗物选择循环。")
+                                break  # 退出 while 循环
+
+                            ocr_relic_options = self.perform_ocr(
+                                img_relic_options)
+                            if not ocr_relic_options:  # 检查OCR结果是否为空
+                                print("步骤7: OCR未能从遗物选项截图中识别任何文本。结束遗物选择循环。")
+                                break  # 退出 while 循环
+
+                            # 4. 选择遗物 ("史诗" > "精英" > "稀有")
+                            print("步骤7: 选择遗物 (优先级: 史诗 > 精英 > 稀有)...")
+                            relic_priority = ["史诗", "精英", "稀有"]
+                            clicked_relic_this_attempt = False
+
+                            for quality in relic_priority:
+                                # 使用 partial_match=False 进行精确品质匹配
+                                if self.click_text(quality, ocr_data=ocr_relic_options, partial_match=False):
+                                    print(f"步骤7: 已点击遗物品质: '{quality}'.")
+                                    clicked_relic_this_attempt = True
+                                    break  # 跳出遗物品质选择 for 循环
+
+                            if not clicked_relic_this_attempt:
+                                print("步骤7: 本轮尝试未能选择任何优先级的遗物。结束遗物选择循环。")
+                                break  # 退出 while 循环
+
+                            # 点击 "确认"
+                            time.sleep(0.5)  # 等待遗物点击生效
+                            if self.wait_for_text_and_click("确认", timeout=5, partial_match=True):
+                                print("步骤7: 已点击“确认”(在选择遗物之后)。")
+                                time.sleep(1.0)  # 等待UI更新，例如“选择烙印”文本可能消失或重新出现
+
+                                # 5. 检查“选择烙印”是否再次出现 (1s超时)
+                                print("步骤7: 检查“选择烙印”是否再次出现 (1s超时)...")
+                                found_select_sigil_again, _ = self.wait_for_text_location(
+                                    "选择烙印", timeout=3.0, interval=0.2, partial_match=True)
+
+                                if found_select_sigil_again:
+                                    print("步骤7: 检测到“选择烙印”再次出现。将继续下一轮遗物选择。")
+                                    select_sigil_still_present_after_loop = True  # 标记以便在循环结束时检查
+                                    # 继续 while 循环的下一次迭代
+                                else:
+                                    print("步骤7: 未再检测到“选择烙印”。认为遗物选择已完成。")
+                                    break  # 退出 while 循环
+                            else:
+                                print("步骤7: 点击遗物后未能找到或点击“确认”。结束遗物选择循环。")
+                                break  # 退出 while 循环
+
+                        # while 循环结束后 (无论是正常结束、break跳出还是达到max_attempts)
+                        if relic_selection_attempts == max_relic_selection_attempts and select_sigil_still_present_after_loop:
+                            print(
+                                f"步骤7: 遗物选择达到最大尝试次数 ({max_relic_selection_attempts})，但“选择烙印”在最后一次检查时仍存在。")
+
+                        print("步骤7: 遗物选择流程结束。前往步骤4。")
+                        current_step = 4
+                        step_executed_successfully = True
 
             # --- 步骤 8 ---
             elif current_step == 8:
@@ -639,78 +693,124 @@ class AutoLabyrinth:
 
             # --- 步骤 9 ---
             elif current_step == 9:
-                print("步骤 9: 选烙印(精英>稀有) -> “确认替换”。若“晶粹不足”->步骤11。")
+                print("步骤 9: 尝试替换烙印 (精英>稀有)。若“晶粹不足”->步骤11，否则->步骤10。")
                 brand_priority_replace = ["精英", "稀有"]
                 clicked_brand_s9 = False
+                self.last_brand_clicked_in_step9 = None  # 重置
 
-                # 扫描烙印选择界面
-                brand_scan_timeout_s9 = 7
-                brand_scan_start_s9 = time.time()
-                ocr_s9_brand = []
-                while time.time() - brand_scan_start_s9 < brand_scan_timeout_s9:
-                    img_s9_brand = self.capture_window()
-                    ocr_s9_brand = self.perform_ocr(
-                        img_s9_brand) if img_s9_brand is not None else []
-                    for quality in brand_priority_replace:
-                        if self.click_text(quality, ocr_data=ocr_s9_brand, partial_match=False):  # 精确匹配
-                            print(f"步骤9: 已点击烙印品质: '{quality}'.")
-                            clicked_brand_s9 = True
-                            break
-                    if clicked_brand_s9:
+                time.sleep(0.5)  # 等待界面
+                img_s9_brand = self.capture_window()
+                ocr_s9_brand = self.perform_ocr(
+                    img_s9_brand) if img_s9_brand is not None else []
+
+                for quality in brand_priority_replace:
+                    if self.click_text(quality, ocr_data=ocr_s9_brand, partial_match=False):
+                        print(f"步骤9: 已点击烙印品质: '{quality}' 用于替换。")
+                        self.last_brand_clicked_in_step9 = quality  # 记录点击的品质
+                        clicked_brand_s9 = True
                         break
 
                 if clicked_brand_s9:
+                    time.sleep(0.5)  # 等待点击生效
                     if self.wait_for_text_and_click("确认替换", timeout=5, partial_match=True):
+                        print("步骤9: 已点击“确认替换”。")
+                        time.sleep(0.5)  # 等待UI响应
                         found_insufficient, _ = self.wait_for_text_location(
-                            "晶粹不足", timeout=1, interval=0.5, partial_match=True)
+                            "晶粹不足", timeout=1, interval=0.2, partial_match=True)
 
                         if found_insufficient:
-                            print("检测到“晶粹不足”。进入步骤 11。")
+                            print("步骤9: 检测到“晶粹不足”。进入步骤 11。")
                             current_step = 11
                         else:
-                            print("未检测到“晶粹不足”。进入步骤 10。")
-                            current_step = 10  # 按原逻辑，这里应该去步骤10
+                            print("步骤9: 未检测到“晶粹不足”。进入步骤 10 (基于已替换的烙印进行后续操作)。")
+                            current_step = 10
                         step_executed_successfully = True
                     else:
-                        print("步骤9: 点击烙印后未找到“确认替换”。可能无需替换或无合适烙印。进入步骤10尝试保留/选史诗。")
+                        print("步骤9: 点击烙印后未找到“确认替换”。进入步骤 10 (尝试保留或选择新烙印)。")
+                        self.last_brand_clicked_in_step9 = None  # 替换未确认，重置状态
                         current_step = 10
-                        step_executed_successfully = True  # 逻辑上是成功的，因为决定了下一步
+                        step_executed_successfully = True
                 else:
-                    print("步骤9: 未找到“精英”或“稀有”烙印可点击。进入步骤10尝试保留或选史诗。")
-                    current_step = 10
-                    step_executed_successfully = True  # 逻辑上是成功的
+                    print("步骤9: 未找到“精英”或“稀有”烙印可点击替换。进入步骤 11。")
+                    self.last_brand_clicked_in_step9 = None  # 没有点击，重置状态
+                    current_step = 11
+                    step_executed_successfully = True
 
             # --- 步骤 10 ---
             elif current_step == 10:
-                print("步骤 10: 等1秒。查“史诗”->点->“确认选择”->C点。否则“保留烙印”。然后回步骤9。")
+                print(
+                    f"步骤 10: 处理烙印选择。上次在步骤9尝试点击的品质: {self.last_brand_clicked_in_step9}")
+                time.sleep(0.5)
                 img_s10 = self.capture_window()
                 ocr_s10 = self.perform_ocr(
                     img_s10) if img_s10 is not None else []
+                initial_ocr_s10 = ocr_s10  # 保存初始OCR结果，用于后续“保留烙印”等
 
                 action_taken_s10 = False
-                # 优先检查并点击“史诗”
-                if self.click_text("史诗", ocr_data=ocr_s10, partial_match=False):  # 精确匹配 "史诗"
-                    # 点击史诗后，重新扫描或用现有OCR数据查找“确认选择”
-                    # ocr_data=None 会触发重新扫描
-                    if self.wait_for_text_and_click("确认选择", timeout=5, partial_match=True):
-                        print(f"点击特定位置 C ({self.specific_pos_c_px}) (史诗选择后)。")
-                        self.click_at_relative(
-                            self.specific_pos_c_px[0], self.specific_pos_c_px[1])
-                        action_taken_s10 = True
-                    else:
-                        print("步骤10: 点击史诗后未找到“确认选择”。")
 
-                if not action_taken_s10:  # 如果史诗路径未成功执行
-                    # 尝试点击“保留烙印”
-                    # 使用之前捕获的 ocr_s10 数据
-                    if self.click_text("保留烙印", ocr_data=ocr_s10, partial_match=True):
-                        print("已点击“保留烙印”。")
-                        action_taken_s10 = True
+                if self.last_brand_clicked_in_step9 == "精英":
+                    print("步骤10: 逻辑分支 - 步骤9点击了“精英”进行替换。现在查找“史诗”。")
+                    if self.click_text("史诗", ocr_data=ocr_s10, partial_match=False):
+                        print("步骤10: 已点击“史诗”。")
+                        if self.wait_for_text_and_click("确认选择", timeout=5, partial_match=True):
+                            print("步骤10: 已点击“确认选择”(史诗)。点击特定位置 C。")
+                            self.click_at_relative(
+                                self.specific_pos_c_px[0], self.specific_pos_c_px[1])
+                            action_taken_s10 = True
+                        else:
+                            print("步骤10: 点击“史诗”后未找到“确认选择”。")
+                            action_taken_s10 = True  # 标记为已尝试操作，避免默认选择史诗或保留
+                    # 如果未找到史诗，则 action_taken_s10 保持 False，会尝试保留烙印
+
+                elif self.last_brand_clicked_in_step9 == "稀有":
+                    print("步骤10: 逻辑分支 - 步骤9点击了“稀有”进行替换。现在查找“史诗”或“精英”。")
+                    sigil_priority_s10_rare_case = ["史诗", "精英"]
+                    for quality_rare in sigil_priority_s10_rare_case:
+                        if self.click_text(quality_rare, ocr_data=ocr_s10, partial_match=False):
+                            print(f"步骤10: 已点击“{quality_rare}”。")
+                            if self.wait_for_text_and_click("确认选择", timeout=5, partial_match=True):
+                                print(
+                                    f"步骤10: 已点击“确认选择”({quality_rare})。点击特定位置 C。")
+                                self.click_at_relative(
+                                    self.specific_pos_c_px[0], self.specific_pos_c_px[1])
+                                action_taken_s10 = True
+                                break
+                            else:
+                                print(f"步骤10: 点击“{quality_rare}”后未找到“确认选择”。")
+                                action_taken_s10 = True  # 标记为已尝试操作
+                                break
+                    # 如果未找到史诗或精英，则 action_taken_s10 保持 False，会尝试保留烙印
+
+                # 默认/回退逻辑: 如果步骤9未点击任何烙印，或者上述特定路径未执行或未成功完成烙印选择和确认
+                if not action_taken_s10 and self.last_brand_clicked_in_step9 is None:
+                    print("步骤10: 逻辑分支 - 默认 (步骤9未指定替换或替换未确认)。查找“史诗”或“精英”。")
+                    sigil_priority_s10_default = ["史诗", "精英"]
+                    for quality_default in sigil_priority_s10_default:
+                        if self.click_text(quality_default, ocr_data=initial_ocr_s10, partial_match=False):
+                            print(f"步骤10 (默认): 已点击烙印品质: '{quality_default}'.")
+                            time.sleep(0.5)
+                            if self.wait_for_text_and_click("确认选择", timeout=5, partial_match=True):
+                                print(f"步骤10 (默认): 已点击“确认选择”。点击特定位置 C。")
+                                self.click_at_relative(
+                                    self.specific_pos_c_px[0], self.specific_pos_c_px[1])
+                                action_taken_s10 = True
+                                break
+                            else:
+                                print(
+                                    f"步骤10 (默认): 点击 '{quality_default}' 后未找到“确认选择”。")
+                                action_taken_s10 = True  # 标记为已尝试操作
+                                break
+
+                # 最后尝试: 如果以上所有操作都未导致选择烙印并确认
+                if not action_taken_s10:
+                    print("步骤10: 所有特定及默认选择均未成功或未执行。尝试点击“保留烙印”。")
+                    if self.click_text("保留烙印", ocr_data=initial_ocr_s10, partial_match=True):
+                        print("步骤10: 已点击“保留烙印”。")
                     else:
-                        print("步骤10: 未找到“史诗”处理链，也未找到“保留烙印”。")
+                        print("步骤10: 未找到“保留烙印”可点击。")
 
                 current_step = 9  # 无论如何都返回步骤9
-                step_executed_successfully = True  # 这是一个循环控制步骤
+                step_executed_successfully = True
                 time.sleep(0.5)  # 返回前稍作等待
 
             # --- 步骤 11 ---
@@ -801,7 +901,6 @@ class AutoLabyrinth:
                         img_s13_brand_select = self.capture_window()
                         ocr_s13_brand_select = self.perform_ocr(
                             img_s13_brand_select) if img_s13_brand_select is not None else []
-
                         brand_priority_s13 = ["史诗", "精英", "稀有"]  # 优先级
                         clicked_brand_in_this_attempt = False
                         for quality in brand_priority_s13:
